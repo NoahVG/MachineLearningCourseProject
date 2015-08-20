@@ -1,0 +1,152 @@
+---
+title: "Machine Learning Course Project"
+author: "NoahVeghGaynor"
+date: "August 19, 2015"
+output: 
+html_document:
+    pandoc_args: [
+      "+RTS", "-Ksize",
+      "-RTS"
+    ]
+---
+
+In this document, I will detail how I created a model to determine the class of subjects in an exercise study. With this model, I was able to correctly predict the class of all 20 subjects in the test file. Since this model has an OOB (Out of bag) error of 2.36%, R predicts that this model will have a 97.64% accuracy on out of sample data, which is backed up by the 20/20 score on the test file.
+
+I chose my final model by:
+
+1. Keeping only the 50 most influential variables (found by creating a random forest model on all variables and using the varImp command)
+
+2. Removing any low variance variables (as defined by the nearZeroVar command)
+
+3. Keeping only 1 of highly correlated variables(i.e. correlation over .8, the most important variable as defined by varImp was kept)
+
+4. Removing any variables that were at least 50% NAs, since these subjects would not be included in the final model by R anyway
+
+
+Variable choice:
+
+First, I partitioned the training data into training and testing sets:
+
+```{r}
+library(caret)
+trainingset <-read.csv("training.csv",header = TRUE)
+part<-createDataPartition(y=trainingset$classe,p=.8,list=FALSE)
+train1<-trainingset[part,]
+test1<-trainingset[-part,]
+```
+
+I then used the training data to train a random forest model and determine the relative importance of each variable.I only kept the 50 most important variables.
+
+```{r,cache=TRUE}
+train_rf2<-train(classe~.,data=train1[,-1],method="rf",prox=TRUE)
+
+train_imp2<-varImp(train_rf2,scale=FALSE)
+
+#gets 50 most important variables
+varImportance<-data.frame(train_imp2$importance)
+varImportance$varnames<-row.names(varImportance)
+top50<-varImportance[order(-varImportance$Overall),][1:50,]
+
+#only keep the top 50 variables
+data_top50<-train1[,which(names(train1) %in% top50$varnames)]
+#but add in name and classe since we need those for the analysis
+data_top50<-cbind(train1$user_name,train1$classe,data_top50)
+```
+
+I then looked at the remaining 50 variables' variances and correlations, removing ones with extremely low variance or high correlation.
+
+```{r}
+zerovar<-nearZeroVar(data_top50,saveMetrics=TRUE)
+
+data_top502<-data_top50[,-nearZeroVar(data_top50)]
+```
+
+```{r}
+#look at correlation
+datacorr<-cor(data_top502[,-c(1:2)],use="complete.obs")
+#adds varImp value to datacorr
+datacorr<-data.frame(datacorr)
+datacorr$value<-top50$Overall[match(row.names(datacorr),top50$varnames)]
+datacorr2<-abs(datacorr)
+test.value <- datacorr2$value
+datacorr2 <- datacorr2[,-ncol(datacorr2)]
+
+#this code determines if variables have a correlation above .8, and only keps the most important variable (as determined by the varImp function earlier) My thanks to Ilya Kashnitsky for his help creating this function.
+remove <- c() 
+for(i in 1:ncol(datacorr2)){
+    coli <- datacorr2[,i] 
+    highcori <- ifelse(coli>=.8 & coli!= 1, TRUE,FALSE) 
+    
+    if(sum(highcori,na.rm = T)>0){
+        
+        posi <- which(highcori) 
+        
+        for(k in 1:length(posi)){
+            if(i!=k){
+                remi <- ifelse(test.value[i]>test.value[posi[k]],posi[k],i)
+                remove <- c(remove,remi) 
+            }
+        }
+    }
+    
+}
+
+remove <- sort(unique(remove)) 
+
+#only include variables kept by above function
+#first add 2 to the remove variable, because the dataset has the name and class variables, while the correlation matrix does not
+remove<-remove+2
+data_top503<-data_top502[,-remove]
+```
+
+Now lets look at the variables and see if there are any others that we might want to remove
+
+```{r}
+colnames(data_top503)
+
+#the 'raw_timestamp' and 'num_window' variables appear to be tracking variables, so can be removed from this analysis. 
+data_top503<- data_top503[,-c(3:4)]
+#We'll also remove the user name variable, and rename the class variable
+data_top503.1<-data_top503[,-1]
+colnames(data_top503.1)[1]<-"classe"
+```
+
+Finally, I will remove all variables that are at least 50% N/As, since they'll significantly reduce the number of complete observations that can be used in the model.
+
+```{r}
+data_top503.1B<-data_top503.1[,colSums(is.na(data_top503.1))<(nrow(data_top503.1)*.5)]
+
+```
+
+Final Model:
+
+Now I will create a new random forest model, using only the 12 variables that have been chosen.
+
+```{r,cache=TRUE}
+model<-train(classe~., data=data_top503.1B,method="rf",prox=FALSE,ntrees=100)
+
+```
+
+As the confusion matrix below shows, this model does an excellent job of predicting the subject class in the test data (this is the test data that was partitioned from the training data, not the final test data). Note the predicted 2.36% OOB error rate.
+
+```{r,cache=TRUE}
+#here are the names of the variables that ended up in this model
+colnames(data_top503.1B)
+
+model$finalModel
+
+pred<-predict(model,newdata=test1)
+
+confusionMatrix(pred,test1$classe)
+```
+
+I then predict the class of each subject in the final test data
+
+```{r}
+finaltest<-read.csv("test.csv",header=TRUE)
+
+pred3<-predict(model,finaltest)
+```
+
+
+
