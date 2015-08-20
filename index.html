@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="UTF-8">
+    <title>Machinelearningcourseproject by NoahVG</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="stylesheets/normalize.css" media="screen">
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,700' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen">
+    <link rel="stylesheet" type="text/css" href="stylesheets/github-light.css" media="screen">
+  </head>
+  <body>
+    <section class="page-header">
+      <h1 class="project-name">Machinelearningcourseproject</h1>
+      <h2 class="project-tagline"></h2>
+      <a href="https://github.com/NoahVG/MachineLearningCourseProject" class="btn">View on GitHub</a>
+      <a href="https://github.com/NoahVG/MachineLearningCourseProject/zipball/master" class="btn">Download .zip</a>
+      <a href="https://github.com/NoahVG/MachineLearningCourseProject/tarball/master" class="btn">Download .tar.gz</a>
+    </section>
+
+    <section class="main-content">
+      <p></p>
+
+<p></p>
+
+<p>In this document, I will detail how I created a model to determine the class of subjects in an exercise study. With this model, I was able to correctly predict the class of all 20 subjects in the test file. Since this model has an OOB (Out of bag) error of 2.36%, R predicts that this model will have a 97.64% accuracy on out of sample data, which is backed up by the 20/20 score on the test file.</p>
+
+<p>I chose my final model by:</p>
+
+<ol>
+<li><p>Keeping only the 50 most influential variables (found by creating a random forest model on all variables and using the varImp command)</p></li>
+<li><p>Removing any low variance variables (as defined by the nearZeroVar command)</p></li>
+<li><p>Keeping only 1 of highly correlated variables(i.e. correlation over .8, the most important variable as defined by varImp was kept)</p></li>
+<li><p>Removing any variables that were over 50% NAs, since these subjects would not be included in the final model by R anyway</p></li>
+</ol>
+
+<p>Variable choice:</p>
+
+<p>First, I partitioned the training data into training and testing sets:</p>
+
+<pre><code>library(caret)
+trainingset &lt;-read.csv("training.csv",header = TRUE)
+part&lt;-createDataPartition(y=trainingset$classe,p=.8,list=FALSE)
+train1&lt;-trainingset[part,]
+test1&lt;-trainingset[-part,]
+</code></pre>
+
+<p>I then used the training data to train a random forest model and determine the relative importance of each variable.I only kept the 50 most important variables.</p>
+
+<pre><code>train_rf2&lt;-train(classe~.,data=train1[,-1],method="rf",prox=TRUE)
+
+train_imp2&lt;-varImp(train_rf2,scale=FALSE)
+
+#gets 50 most important variables
+varImportance&lt;-data.frame(train_imp2$importance)
+varImportance$varnames&lt;-row.names(varImportance)
+top50&lt;-varImportance[order(-varImportance$Overall),][1:50,]
+
+#only keep the top 50 variables
+data_top50&lt;-train1[,which(names(train1) %in% top50$varnames)]
+#but add in name and classe since we need those for the analysis
+data_top50&lt;-cbind(train1$user_name,train1$classe,data_top50)
+</code></pre>
+
+<p>I then looked at the remaining 50 variables' variances and correlations, removing ones with extremely low variance or high correlation.</p>
+
+<pre><code>zerovar&lt;-nearZeroVar(data_top50,saveMetrics=TRUE)
+
+data_top502&lt;-data_top50[,-nearZeroVar(data_top50)]
+</code></pre>
+
+<pre><code>#look at correlation
+datacorr&lt;-cor(data_top502[,-c(1:2)],use="complete.obs")
+#adds varImp value to datacorr
+datacorr&lt;-data.frame(datacorr)
+datacorr$value&lt;-top50$Overall[match(row.names(datacorr),top50$varnames)]
+datacorr2&lt;-abs(datacorr)
+test.value &lt;- datacorr2$value
+datacorr2 &lt;- datacorr2[,-ncol(datacorr2)]
+
+#this code determines if variables have a correlation above .8, and only keps the most important variable (as determined by the varImp function earlier) My thanks to Ilya Kashnitsky for his help creating this function.
+remove &lt;- c() 
+for(i in 1:ncol(datacorr2)){
+    coli &lt;- datacorr2[,i] 
+    highcori &lt;- ifelse(coli&gt;=.8 &amp; coli!= 1, TRUE,FALSE) 
+
+    if(sum(highcori,na.rm = T)&gt;0){
+
+        posi &lt;- which(highcori) 
+
+        for(k in 1:length(posi)){
+            if(i!=k){
+                remi &lt;- ifelse(test.value[i]&gt;test.value[posi[k]],posi[k],i)
+                remove &lt;- c(remove,remi) 
+            }
+        }
+    }
+
+}
+
+remove &lt;- sort(unique(remove)) 
+
+#only include variables kept by above function
+#first add 2 to the remove variable, because the dataset has the name and class variables, while the correlation matrix does not
+remove&lt;-remove+2
+data_top503&lt;-data_top502[,-remove]
+</code></pre>
+
+<p>Now lets look at the variables and see if there are any others that we might want to remove</p>
+
+<pre><code>colnames(data_top503)
+</code></pre>
+
+<pre><code>##  [1] "train1$user_name"      "train1$classe"        
+##  [3] "raw_timestamp_part_1"  "num_window"           
+##  [5] "roll_belt"             "pitch_belt"           
+##  [7] "amplitude_roll_belt"   "stddev_roll_belt"     
+##  [9] "stddev_pitch_belt"     "magnet_belt_y"        
+## [11] "magnet_belt_z"         "var_accel_arm"        
+## [13] "magnet_arm_y"          "min_yaw_arm"          
+## [15] "amplitude_pitch_arm"   "min_roll_dumbbell"    
+## [17] "var_accel_dumbbell"    "avg_roll_dumbbell"    
+## [19] "avg_pitch_dumbbell"    "stddev_pitch_dumbbell"
+## [21] "var_yaw_dumbbell"      "gyros_dumbbell_y"     
+## [23] "accel_dumbbell_x"      "accel_dumbbell_y"     
+## [25] "magnet_dumbbell_x"     "magnet_dumbbell_y"    
+## [27] "magnet_dumbbell_z"     "pitch_forearm"        
+## [29] "var_accel_forearm"     "magnet_forearm_x"
+</code></pre>
+
+<pre><code>#the 'raw_timestamp' and 'num_window' variables appear to be tracking variables, so can be removed from this analysis. 
+data_top503&lt;- data_top503[,-c(3:4)]
+#We'll also remove the user name variable, and rename the class variable
+data_top503.1&lt;-data_top503[,-1]
+colnames(data_top503.1)[1]&lt;-"classe"
+</code></pre>
+
+<p>Finally, I will remove all variables that are over 50% N/As, since they'll significantly reduce the number of complete observations that can be used in the model.</p>
+
+<pre><code>data_top503.1B&lt;-data_top503.1[,colSums(is.na(data_top503.1))&lt;(nrow(data_top503.1)*.5)]
+</code></pre>
+
+<p>Final Model:</p>
+
+<p>Now I will create a new random forest model, using only the 14 variables that have been chosen.</p>
+
+<pre><code>model&lt;-train(classe~., data=data_top503.1B,method="rf",prox=FALSE,ntrees=100)
+</code></pre>
+
+<p>As the confusion matrix below shows, this model does an excellent job of predicting the subject class in the test data (this is the test data that was partitioned from the training data, not the final test data). Note the predicted 2.36% OOB error rate.</p>
+
+<pre><code>#here are the names of the variables that ended up in this model
+colnames(data_top503.1B)
+</code></pre>
+
+<pre><code>##  [1] "classe"            "pitch_belt"        "magnet_belt_y"    
+##  [4] "magnet_belt_z"     "magnet_arm_y"      "gyros_dumbbell_y" 
+##  [7] "accel_dumbbell_x"  "accel_dumbbell_y"  "magnet_dumbbell_x"
+## [10] "magnet_dumbbell_y" "magnet_dumbbell_z" "pitch_forearm"    
+## [13] "magnet_forearm_x"
+</code></pre>
+
+<pre><code>model$finalModel
+</code></pre>
+
+<pre><code>## 
+## Call:
+##  randomForest(x = x, y = y, mtry = param$mtry, proximity = FALSE,      ntrees = 100) 
+##                Type of random forest: classification
+##                      Number of trees: 500
+## No. of variables tried at each split: 2
+## 
+##         OOB estimate of  error rate: 2.36%
+## Confusion matrix:
+##      A    B    C    D    E class.error
+## A 4434    9    8   11    2  0.00672043
+## B   86 2890   46   15    1  0.04871626
+## C    1   41 2686    7    3  0.01899196
+## D   10    1   95 2461    6  0.04352895
+## E    0    8    5   15 2858  0.00970201
+</code></pre>
+
+<pre><code>pred&lt;-predict(model,newdata=test1)
+
+confusionMatrix(pred,test1$classe)
+</code></pre>
+
+<pre><code>## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction    A    B    C    D    E
+##          A 1114    3    0    0    0
+##          B    2  756    1    0    1
+##          C    0    0  683    9    0
+##          D    0    0    0  634    1
+##          E    0    0    0    0  719
+## 
+## Overall Statistics
+##                                           
+##                Accuracy : 0.9957          
+##                  95% CI : (0.9931, 0.9975)
+##     No Information Rate : 0.2845          
+##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                                           
+##                   Kappa : 0.9945          
+##  Mcnemar's Test P-Value : NA              
+## 
+## Statistics by Class:
+## 
+##                      Class: A Class: B Class: C Class: D Class: E
+## Sensitivity            0.9982   0.9960   0.9985   0.9860   0.9972
+## Specificity            0.9989   0.9987   0.9972   0.9997   1.0000
+## Pos Pred Value         0.9973   0.9947   0.9870   0.9984   1.0000
+## Neg Pred Value         0.9993   0.9991   0.9997   0.9973   0.9994
+## Prevalence             0.2845   0.1935   0.1744   0.1639   0.1838
+## Detection Rate         0.2840   0.1927   0.1741   0.1616   0.1833
+## Detection Prevalence   0.2847   0.1937   0.1764   0.1619   0.1833
+## Balanced Accuracy      0.9986   0.9974   0.9979   0.9928   0.9986
+</code></pre>
+
+<p>I then predict the class of each subject in the final test data</p>
+
+<pre><code>finaltest&lt;-read.csv("test.csv",header=TRUE)
+
+pred3&lt;-predict(model,finaltest)
+</code></pre>
+
+<p></p>
+
+<p></p>
+
+      <footer class="site-footer">
+        <span class="site-footer-owner"><a href="https://github.com/NoahVG/MachineLearningCourseProject">Machinelearningcourseproject</a> is maintained by <a href="https://github.com/NoahVG">NoahVG</a>.</span>
+
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a> using the <a href="https://github.com/jasonlong/cayman-theme">Cayman theme</a> by <a href="https://twitter.com/jasonlong">Jason Long</a>.</span>
+      </footer>
+
+    </section>
+
+  
+  </body>
+</html>
